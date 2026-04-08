@@ -4,3 +4,4 @@ pydantic
 openai
 requests
 streamlit
+openenv-core
