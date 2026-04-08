@@ -1,0 +1,16 @@
+name: data-annotation-qc-env
+description: QC pipeline with annotator reliability and confidence calibration
+
+observation_model: Observation
+action_model: Action
+reward_model: Reward
+
+endpoints:
+  reset: GET /reset
+  step: POST /step
+  state: GET /state
+
+tasks:
+  - name: easy
+  - name: medium
+  - name: hard
