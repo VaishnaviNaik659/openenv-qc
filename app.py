@@ -7,7 +7,12 @@ app = FastAPI()
 env = QCEnvironment(task_type="hard")
 
 
-@app.post("/reset")   # ✅ FIXED (was GET)
+@app.get("/")
+def root():
+    return {"status": "running"}  
+
+
+@app.post("/reset")
 def reset():
     obs = env.reset()
     return obs.dict()
