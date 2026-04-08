@@ -1,0 +1,17 @@
+[project]
+name = "openenv-qc"
+version = "0.1.0"
+description = "Data Annotation Quality Control Environment for OpenEnv"
+authors = [
+    { name="Vaishnavi Naik" }
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "openai",
+    "requests"
+]
+
+[tool.openenv]
+entrypoint = "app:app"
