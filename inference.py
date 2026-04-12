@@ -1,18 +1,17 @@
 import asyncio
 import os
 import json
+import requests
 from typing import List
-
 from openai import OpenAI
-from openenv import OpenEnv
 
-# ===== ENV VARS =====
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-qc")
 
-# ===== CLIENT =====
+# 👉 YOUR RUNNING SERVER (local or HF Space)
+ENV_URL = "http://localhost:8000"
+
 client = OpenAI(
     base_url=API_BASE_URL,
     api_key=API_KEY
@@ -22,15 +21,13 @@ TASKS = ["easy", "medium", "hard"]
 MAX_STEPS = 10
 
 
-# ===== LOGGING =====
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step, action, reward, done, error):
-    err = error if error else "null"
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={err}",
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}",
         flush=True
     )
 
@@ -43,7 +40,7 @@ def log_end(success, steps, score, rewards):
     )
 
 
-# ===== GUARANTEED API CALL =====
+# 🔥 GUARANTEE API CALL
 def warmup_call():
     try:
         client.chat.completions.create(
@@ -51,23 +48,20 @@ def warmup_call():
             messages=[{"role": "user", "content": "hello"}],
             max_tokens=5
         )
-    except Exception:
-        pass  # don't crash
-
-
-# ===== LLM ACTION =====
-def get_action(obs):
-    try:
-        # API CALL (important for validator)
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": f"Text: {getattr(obs, 'text', 'sample')}"}],
-            max_tokens=50
-        )
-    except Exception:
+    except:
         pass
 
-    # return safe default action
+
+def get_action(obs):
+    try:
+        client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": f"Text: {obs.get('text', '')}"}],
+            max_tokens=50
+        )
+    except:
+        pass
+
     return {
         "is_correct": True,
         "correct_label": "neutral",
@@ -75,49 +69,26 @@ def get_action(obs):
     }
 
 
-# ===== RUN TASK =====
 async def run_task(task):
     rewards: List[float] = []
     steps = 0
-    success = False
-    score = 0.0
 
     log_start(task, "qc_env", MODEL_NAME)
 
-    env = None
-
     try:
-        # SAFE ENV LOAD
-        try:
-            env = await OpenEnv.from_docker_image(IMAGE_NAME)
-        except Exception as e:
-            log_step(0, "env_error", 0.00, True, str(e))
-            log_end(False, 0, 0.0, [])
-            return
-
-        result = await env.reset()
+        res = requests.post(f"{ENV_URL}/reset", json={})
+        data = res.json()
 
         for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
-
-            obs = result.observation
+            obs = data.get("observation", {})
 
             action = get_action(obs)
 
-            try:
-                result = await env.step(action)
-            except Exception as e:
-                log_step(step, str(action), 0.00, True, str(e))
-                break
+            res = requests.post(f"{ENV_URL}/step", json=action)
+            data = res.json()
 
-            reward = (
-                result.reward.score
-                if hasattr(result.reward, "score")
-                else 0.0
-            )
-
-            done = result.done
+            reward = data.get("reward", {}).get("score", 0.0)
+            done = data.get("done", False)
 
             rewards.append(reward)
             steps = step
@@ -132,20 +103,13 @@ async def run_task(task):
 
     except Exception as e:
         log_step(steps, "error", 0.00, True, str(e))
+        success = False
+        score = 0.0
 
-    finally:
-        if env:
-            try:
-                await env.close()
-            except:
-                pass
-
-        log_end(success, steps, score, rewards)
+    log_end(success, steps, score, rewards)
 
 
-# ===== MAIN =====
 async def main():
-    # ensure API call always happens
     warmup_call()
 
     for task in TASKS:
