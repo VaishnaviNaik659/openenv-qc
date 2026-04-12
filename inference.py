@@ -3,26 +3,25 @@ import os
 import requests
 import json
 from typing import List
-
 from openai import OpenAI
 
-# ✅ MUST use these EXACT env variables
+# ✅ REQUIRED ENV VARIABLES (DO NOT CHANGE)
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
-ENV_URL = "http://localhost:8000"   # local env (validator uses docker)
+ENV_URL = "http://localhost:8000"
 TASKS = ["easy", "medium", "hard"]
-MAX_STEPS = 15
+MAX_STEPS = 10
 
-# ✅ Correct client (MANDATORY)
+# ✅ CORRECT CLIENT (MANDATORY)
 client = OpenAI(
     base_url=API_BASE_URL,
     api_key=API_KEY
 )
 
 
-# ---------------- LOGGING (MANDATORY FORMAT) ---------------- #
+# ---------------- LOGGING ---------------- #
 
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -44,11 +43,11 @@ def log_end(success, steps, score, rewards):
     )
 
 
-# ---------------- LLM AGENT (IMPORTANT) ---------------- #
+# ---------------- LLM CALL (CRITICAL FIX) ---------------- #
 
 def get_action_from_llm(obs):
     prompt = f"""
-You are performing data annotation quality control.
+You are a data annotation quality control agent.
 
 Text: {obs['text']}
 Given Label: {obs['given_label']}
@@ -58,33 +57,28 @@ Decide:
 - correct_label (positive/negative/neutral)
 - confidence (0.0 to 1.0)
 
-Return ONLY valid JSON:
+Return ONLY JSON:
 {{
   "is_correct": true/false,
   "correct_label": "positive/negative/neutral",
-  "confidence": 0.0-1.0
+  "confidence": 0.0
 }}
 """
 
+    # 🚨 THIS CALL MUST ALWAYS HAPPEN
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=100
+    )
+
+    content = response.choices[0].message.content.strip()
+
+    # Safe parsing (AFTER API CALL)
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=100
-        )
-
-        content = response.choices[0].message.content.strip()
-
-        # Try parsing JSON
         return json.loads(content)
-
-    except Exception as e:
-        print(f"[DEBUG] LLM error: {e}", flush=True)
-
-        # fallback (safe action)
+    except:
         return {
             "is_correct": True,
             "correct_label": obs["given_label"],
@@ -92,7 +86,7 @@ Return ONLY valid JSON:
         }
 
 
-# ---------------- MAIN LOOP ---------------- #
+# ---------------- ENV LOOP ---------------- #
 
 async def run_task(task_name):
     rewards = []
@@ -123,15 +117,16 @@ async def run_task(task_name):
 
             obs = res["observation"]
 
-        # normalize score
         score = sum(rewards) / len(rewards) if rewards else 0.0
         success = score > 0.5
 
     except Exception as e:
-        log_step(steps, "error", 0.0, True, str(e))
+        log_step(steps, "error", 0.00, True, str(e))
 
     log_end(success, steps, score, rewards)
 
+
+# ---------------- MAIN ---------------- #
 
 async def main():
     for task in TASKS:
