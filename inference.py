@@ -1,24 +1,25 @@
 import asyncio
 import os
-import requests
 import json
 from typing import List
-from openai import OpenAI
 
-# ✅ REQUIRED ENV VARIABLES (DO NOT CHANGE)
+from openai import OpenAI
+from openenv import OpenEnv
+
+# ENV VARS (MANDATORY)
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
-ENV_URL = "http://localhost:8000"
-TASKS = ["easy", "medium", "hard"]
-MAX_STEPS = 10
+IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-qc")
 
-# ✅ CORRECT CLIENT (MANDATORY)
 client = OpenAI(
     base_url=API_BASE_URL,
     api_key=API_KEY
 )
+
+TASKS = ["easy", "medium", "hard"]
+MAX_STEPS = 10
 
 
 # ---------------- LOGGING ---------------- #
@@ -43,21 +44,14 @@ def log_end(success, steps, score, rewards):
     )
 
 
-# ---------------- LLM CALL (CRITICAL FIX) ---------------- #
+# ---------------- LLM ---------------- #
 
-def get_action_from_llm(obs):
+def get_action(obs):
     prompt = f"""
-You are a data annotation quality control agent.
+Text: {obs.text}
+Given Label: {obs.given_label}
 
-Text: {obs['text']}
-Given Label: {obs['given_label']}
-
-Decide:
-- is_correct (true/false)
-- correct_label (positive/negative/neutral)
-- confidence (0.0 to 1.0)
-
-Return ONLY JSON:
+Return JSON:
 {{
   "is_correct": true/false,
   "correct_label": "positive/negative/neutral",
@@ -65,7 +59,6 @@ Return ONLY JSON:
 }}
 """
 
-    # 🚨 THIS CALL MUST ALWAYS HAPPEN
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
@@ -75,37 +68,40 @@ Return ONLY JSON:
 
     content = response.choices[0].message.content.strip()
 
-    # Safe parsing (AFTER API CALL)
     try:
         return json.loads(content)
     except:
         return {
             "is_correct": True,
-            "correct_label": obs["given_label"],
+            "correct_label": obs.given_label,
             "confidence": 0.5
         }
 
 
-# ---------------- ENV LOOP ---------------- #
+# ---------------- MAIN ---------------- #
 
-async def run_task(task_name):
-    rewards = []
+async def run_task(task):
+    env = await OpenEnv.from_docker_image(IMAGE_NAME)
+
+    rewards: List[float] = []
     steps = 0
-    score = 0.0
-    success = False
 
-    log_start(task_name, "qc_env", MODEL_NAME)
+    log_start(task, "qc_env", MODEL_NAME)
 
     try:
-        obs = requests.post(f"{ENV_URL}/reset").json()
+        result = await env.reset()
 
         for step in range(1, MAX_STEPS + 1):
-            action = get_action_from_llm(obs)
+            if result.done:
+                break
 
-            res = requests.post(f"{ENV_URL}/step", json=action).json()
+            obs = result.observation
+            action = get_action(obs)
 
-            reward = res["reward"]["score"]
-            done = res["done"]
+            result = await env.step(action)
+
+            reward = result.reward.score
+            done = result.done
 
             rewards.append(reward)
             steps = step
@@ -115,18 +111,13 @@ async def run_task(task_name):
             if done:
                 break
 
-            obs = res["observation"]
-
         score = sum(rewards) / len(rewards) if rewards else 0.0
         success = score > 0.5
 
-    except Exception as e:
-        log_step(steps, "error", 0.00, True, str(e))
+    finally:
+        await env.close()
+        log_end(success, steps, score, rewards)
 
-    log_end(success, steps, score, rewards)
-
-
-# ---------------- MAIN ---------------- #
 
 async def main():
     for task in TASKS:
