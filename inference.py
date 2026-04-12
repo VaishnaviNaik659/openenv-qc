@@ -6,11 +6,10 @@ from typing import List
 from openai import OpenAI
 from openenv import OpenEnv
 
-# ENV VARS (MANDATORY)
+# ===== ENV VARS (MANDATORY) =====
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-qc")
 
 client = OpenAI(
@@ -22,8 +21,7 @@ TASKS = ["easy", "medium", "hard"]
 MAX_STEPS = 10
 
 
-# ---------------- LOGGING ---------------- #
-
+# ===== LOGGING (STRICT FORMAT) =====
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -44,14 +42,15 @@ def log_end(success, steps, score, rewards):
     )
 
 
-# ---------------- LLM ---------------- #
-
+# ===== LLM CALL (CRITICAL — MUST EXECUTE) =====
 def get_action(obs):
     prompt = f"""
+You are a data annotation QC agent.
+
 Text: {obs.text}
 Given Label: {obs.given_label}
 
-Return JSON:
+Return ONLY JSON:
 {{
   "is_correct": true/false,
   "correct_label": "positive/negative/neutral",
@@ -59,6 +58,7 @@ Return JSON:
 }}
 """
 
+    # 🚨 MUST ALWAYS EXECUTE (no early return)
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
@@ -78,8 +78,7 @@ Return JSON:
         }
 
 
-# ---------------- MAIN ---------------- #
-
+# ===== RUN ONE TASK =====
 async def run_task(task):
     env = await OpenEnv.from_docker_image(IMAGE_NAME)
 
@@ -96,6 +95,8 @@ async def run_task(task):
                 break
 
             obs = result.observation
+
+            # 🚨 LLM CALL HAPPENS HERE
             action = get_action(obs)
 
             result = await env.step(action)
@@ -119,6 +120,7 @@ async def run_task(task):
         log_end(success, steps, score, rewards)
 
 
+# ===== MAIN =====
 async def main():
     for task in TASKS:
         await run_task(task)
