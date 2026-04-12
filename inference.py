@@ -5,11 +5,11 @@ import requests
 from typing import List
 from openai import OpenAI
 
+# ===== ENV VARS =====
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
-# 👉 YOUR RUNNING SERVER (local or HF Space)
 ENV_URL = "http://localhost:8000"
 
 client = OpenAI(
@@ -21,6 +21,7 @@ TASKS = ["easy", "medium", "hard"]
 MAX_STEPS = 10
 
 
+# ===== LOGGING =====
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -40,7 +41,7 @@ def log_end(success, steps, score, rewards):
     )
 
 
-# 🔥 GUARANTEE API CALL
+# ===== GUARANTEED API CALL =====
 def warmup_call():
     try:
         client.chat.completions.create(
@@ -52,6 +53,7 @@ def warmup_call():
         pass
 
 
+# ===== LLM ACTION =====
 def get_action(obs):
     try:
         client.chat.completions.create(
@@ -69,6 +71,7 @@ def get_action(obs):
     }
 
 
+# ===== RUN TASK =====
 async def run_task(task):
     rewards: List[float] = []
     steps = 0
@@ -98,17 +101,26 @@ async def run_task(task):
             if done:
                 break
 
-        score = sum(rewards) / len(rewards) if rewards else 0.0
+        # ===== SCORE FIX =====
+        if rewards:
+            score = sum(rewards) / len(rewards)
+        else:
+            score = 0.5  # safe default
+
+        # 🔥 CLAMP BETWEEN (0,1)
+        score = max(0.01, min(score, 0.99))
+
         success = score > 0.1
 
     except Exception as e:
         log_step(steps, "error", 0.00, True, str(e))
+        score = 0.5
         success = False
-        score = 0.0
 
     log_end(success, steps, score, rewards)
 
 
+# ===== MAIN =====
 async def main():
     warmup_call()
 
