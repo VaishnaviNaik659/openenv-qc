@@ -53,22 +53,48 @@ def warmup_call():
         pass
 
 
-# ===== LLM ACTION =====
+# ===== SMART LLM AGENT =====
 def get_action(obs):
-    try:
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": f"Text: {obs.get('text', '')}"}],
-            max_tokens=50
-        )
-    except:
-        pass
+    text = obs.get("text", "")
+    label = obs.get("given_label", "neutral")
 
-    return {
-        "is_correct": True,
-        "correct_label": "neutral",
-        "confidence": 0.5
-    }
+    prompt = f"""
+You are a Quality Control (QC) reviewer for sentiment annotation.
+
+Text: "{text}"
+Given Label: "{label}"
+
+Decide:
+1. Is the label correct?
+2. If not, what is the correct label?
+
+Return ONLY JSON:
+{{
+  "is_correct": true/false,
+  "correct_label": "positive/negative/neutral",
+  "confidence": 0.0
+}}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=100
+        )
+
+        content = response.choices[0].message.content.strip()
+
+        return json.loads(content)
+
+    except:
+        # fallback
+        return {
+            "is_correct": True,
+            "correct_label": label,
+            "confidence": 0.5
+        }
 
 
 # ===== RUN TASK =====
@@ -105,12 +131,12 @@ async def run_task(task):
         if rewards:
             score = sum(rewards) / len(rewards)
         else:
-            score = 0.5  # safe default
+            score = 0.5
 
-        # 🔥 CLAMP BETWEEN (0,1)
+        # clamp to (0,1)
         score = max(0.01, min(score, 0.99))
 
-        success = score > 0.1
+        success = score > 0.5
 
     except Exception as e:
         log_step(steps, "error", 0.00, True, str(e))
