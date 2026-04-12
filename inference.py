@@ -4,7 +4,7 @@ import json
 from typing import List
 
 from openai import OpenAI
-from openenv import OpenEnv
+from env.environment import QCEnvironment   # ✅ FIXED IMPORT
 
 # ===== ENV VARS (MANDATORY) =====
 API_BASE_URL = os.environ["API_BASE_URL"]
@@ -12,6 +12,7 @@ API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 IMAGE_NAME = os.getenv("IMAGE_NAME", "openenv-qc")
 
+# ✅ OpenAI client (MANDATORY)
 client = OpenAI(
     base_url=API_BASE_URL,
     api_key=API_KEY
@@ -58,7 +59,7 @@ Return ONLY JSON:
 }}
 """
 
-    # 🚨 MUST ALWAYS EXECUTE (no early return)
+    # 🚨 THIS CALL MUST ALWAYS HAPPEN
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
@@ -80,7 +81,8 @@ Return ONLY JSON:
 
 # ===== RUN ONE TASK =====
 async def run_task(task):
-    env = await OpenEnv.from_docker_image(IMAGE_NAME)
+    # ✅ FIXED: use correct environment class
+    env = await QCEnvironment.from_docker_image(IMAGE_NAME)
 
     rewards: List[float] = []
     steps = 0
